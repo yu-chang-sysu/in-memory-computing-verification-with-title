@@ -34,16 +34,32 @@ class MemoryComputeUnit:
         self.weights = weights
         self.synapses = [Synapse(w) for w in weights]
         
-        # ====== 关键修复：正确计算ADC范围 ======
-        # 单个Synapse的差分电流范围: [-190nA, +190nA]
-        # 20个Synapse输出范围: [-3.8uA, +3.8uA]
-        # 但实际电流还要乘以输入强度 input_strength ∈ [-1, +1]
-        # 因此最终电流范围: [-3.8uA, +3.8uA]
+        # ====== 关键修复：自动计算ADC范围 ======
+        # 基于实际权重产生的电流范围来设置ADC范围
         
-        # ADC范围必须覆盖完整的电流范围
-        # 设置为 ±4.0uA 以确保充分覆盖
-        adc_i_min = -4.0e-6  # -4.0 uA
-        adc_i_max = 4.0e-6   # +4.0 uA
+        # 计算单个权重的最大和最小电流
+        # Synapse输出: I_pos - I_neg
+        # 当weight=+7: pos_cell(7)=200nA, neg_cell(0)=10nA -> +190nA
+        # 当weight=-7: pos_cell(0)=10nA, neg_cell(7)=200nA -> -190nA
+        # 当weight=0: pos_cell(0)=10nA, neg_cell(0)=10nA -> 0nA
+        
+        # 计算单个Synapse的电流范围
+        i_max_single_synapse = 190e-9  # 最大差分电流: 190nA
+        i_min_single_synapse = -190e-9  # 最小差分电流: -190nA
+        
+        # 20个权重的总电流范围（未加权）
+        i_total_max = 20 * i_max_single_synapse  # 3.8 uA
+        i_total_min = 20 * i_min_single_synapse  # -3.8 uA
+        
+        # 加权后（input_strength ∈ [-1, +1]），电流范围不变
+        # 设置ADC范围为实际范围的110%，留出安全余量
+        adc_i_min = i_total_min * 1.1  # -4.18 uA
+        adc_i_max = i_total_max * 1.1  # +4.18 uA
+        
+        print(f"[ADC自适应配置]")
+        print(f"  - 单个Synapse电流范围: {i_min_single_synapse*1e9:.1f} ~ {i_max_single_synapse*1e9:.1f} nA")
+        print(f"  - 20个权重总电流范围: {i_total_min*1e6:.2f} ~ {i_total_max*1e6:.2f} uA")
+        print(f"  - ADC配置范围: {adc_i_min*1e6:.2f} ~ {adc_i_max*1e6:.2f} uA")
         
         self.bitline = BitLine(adc_i_min=adc_i_min, adc_i_max=adc_i_max, adc_bits=4)
     
@@ -64,17 +80,7 @@ class MemoryComputeUnit:
         """
         assert 0 <= input_code <= 15, "Input must be 0-15 (4-bit)"
         
-        # ====== 关键修复：正确的输入信号映射 ======
         # 将 input_code (0-15) 映射到 input_strength (-1, +1)
-        # 
-        # 原错误方案: input_strength = input_code / 15.0  (范围[0, 1])
-        #   - 只能产生非负电流
-        #   - 不能充分利用负权重
-        #
-        # 正确方案: 
-        #   input_code=0  → -1.0 (最小/最负)
-        #   input_code=7  → 0.0  (中点)
-        #   input_code=15 → +1.0 (最大/最正)
         input_strength = (input_code / 7.5) - 1.0
         
         # 计算各权重的电流贡献
