@@ -33,11 +33,19 @@ class MemoryComputeUnit:
         
         self.weights = weights
         self.synapses = [Synapse(w) for w in weights]
-        self.bitline = BitLine(adc_i_min=0, adc_i_max=20e-6, adc_bits=4)
         
-        # 统计信息
-        self.i_min_per_input = 10e-9 * 20  # 最小输入电流 (20个cell最小值)
-        self.i_max_per_input = 200e-9 * 20  # 最大输入电流 (20个cell最大值)
+        # ====== 关键修复：正确计算ADC范围 ======
+        # 单个Synapse的差分电流范围: [-190nA, +190nA]
+        # 20个Synapse输出范围: [-3.8uA, +3.8uA]
+        # 但实际电流还要乘以输入强度 input_strength ∈ [-1, +1]
+        # 因此最终电流范围: [-3.8uA, +3.8uA]
+        
+        # ADC范围必须覆盖完整的电流范围
+        # 设置为 ±4.0uA 以确保充分覆盖
+        adc_i_min = -4.0e-6  # -4.0 uA
+        adc_i_max = 4.0e-6   # +4.0 uA
+        
+        self.bitline = BitLine(adc_i_min=adc_i_min, adc_i_max=adc_i_max, adc_bits=4)
     
     def compute(self, input_code):
         """
@@ -56,16 +64,27 @@ class MemoryComputeUnit:
         """
         assert 0 <= input_code <= 15, "Input must be 0-15 (4-bit)"
         
+        # ====== 关键修复：正确的输入信号映射 ======
+        # 将 input_code (0-15) 映射到 input_strength (-1, +1)
+        # 
+        # 原错误方案: input_strength = input_code / 15.0  (范围[0, 1])
+        #   - 只能产生非负电流
+        #   - 不能充分利用负权重
+        #
+        # 正确方案: 
+        #   input_code=0  → -1.0 (最小/最负)
+        #   input_code=7  → 0.0  (中点)
+        #   input_code=15 → +1.0 (最大/最正)
+        input_strength = (input_code / 7.5) - 1.0
+        
         # 计算各权重的电流贡献
-        # input_code作为控制信号，决定了通过的"信号强度"
-        # 简单模型: 总电流 = sum(weight_current * input_code)
         synapse_currents = []
         total_current = 0
         
         for synapse in self.synapses:
-            i_synapse = synapse.get_current()
-            # 加权
-            i_weighted = i_synapse * (input_code / 15.0)  # 归一化到[0,1]
+            i_synapse = synapse.get_current()  # ±190nA
+            # 加权: 乘以输入强度
+            i_weighted = i_synapse * input_strength
             synapse_currents.append(i_weighted)
             total_current += i_weighted
         
