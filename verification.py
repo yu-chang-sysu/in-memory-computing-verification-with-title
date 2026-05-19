@@ -1,11 +1,30 @@
 """
 验证框架
-- 随机生成输���
+- 随机生成输入
 - 对比目标输出和实际输出
 - 计算误差指标
 """
 
 import numpy as np
+import matplotlib
+
+# ==========================================
+# 0. 设置绘图后端以兼容 PyCharm
+# ==========================================
+try:
+    matplotlib.use('TkAgg')
+except:
+    try:
+        matplotlib.use('Qt5Agg')
+    except:
+        pass
+
+# ==========================================
+# 1. 设置中文字体支持
+# ==========================================
+matplotlib.rcParams['font.sans-serif'] = ['SimHei', 'DejaVu Sans']
+matplotlib.rcParams['axes.unicode_minus'] = False
+
 import matplotlib.pyplot as plt
 from memory_compute import MemoryComputeUnit
 
@@ -30,10 +49,10 @@ class Verification:
         print("存算结构验证框架")
         print("=" * 60)
         print(f"配置:")
-        print(f"  - 权重数: 20")
+        print(f"  - 权重组织: 10串 × 10个")
         print(f"  - Input: 4-bit (0-15)")
         print(f"  - Cell电流范围: 10nA - 200nA")
-        print(f"  - ADC: 4-bit (16等级)")
+        print(f"  - ADC: 6-bit动态范围 (64等级)")
         print(f"  - 测试样本数: {num_tests}")
         print(f"\n权重配置:\n{self.mcu.weights}")
         print("=" * 60)
@@ -124,8 +143,8 @@ class Verification:
         
         # 2. ADC输出分布
         ax = axes[0, 1]
-        ax.hist(analysis['adc_codes'], bins=16, edgecolor='black', alpha=0.7)
-        ax.set_xlabel('ADC码 (0-15)')
+        ax.hist(analysis['adc_codes'], bins=64, edgecolor='black', alpha=0.7)
+        ax.set_xlabel('ADC码 (0-63)')
         ax.set_ylabel('出现次数')
         ax.set_title('ADC输出分布')
         ax.grid(True, alpha=0.3, axis='y')
@@ -146,7 +165,9 @@ class Verification:
         ax.scatter(analysis['total_currents']*1e6, analysis['recovered_currents']*1e6,
                   alpha=0.6, s=50, label='ADC Output')
         # 绘制理想曲线
-        i_range = np.linspace(0, 20, 100)
+        i_min = min(analysis['total_currents'].min(), analysis['recovered_currents'].min())
+        i_max = max(analysis['total_currents'].max(), analysis['recovered_currents'].max())
+        i_range = np.linspace(i_min, i_max, 100)
         ax.plot(i_range, i_range, 'r--', linewidth=2, label='Ideal')
         ax.set_xlabel('目标电流 (uA)')
         ax.set_ylabel('恢复电流 (uA)')
@@ -161,9 +182,9 @@ class Verification:
     def print_sample_results(self, results, num_samples=10):
         """打印样本结果"""
         print(f"\n前 {num_samples} 个样本的详细结果:")
-        print("-" * 80)
+        print("-" * 100)
         print(f"{'ID':>3} {'Input':>5} {'总电流(uA)':>12} {'ADC码':>7} {'恢复电流(uA)':>14} {'误差(nA)':>10}")
-        print("-" * 80)
+        print("-" * 100)
         
         for i in range(min(num_samples, len(results))):
             r = results[i]
